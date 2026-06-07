@@ -1,0 +1,17 @@
+{
+  "name": "nexal-backend",
+  "version": "1.0.0",
+  "description": "Unified backend runner — starts Aria Backend (Socket.IO + AI) and Search Backend (REST API) together",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail --prefix-colors \"cyan,magenta\" --names \"ARIA,SEARCH\" \"npm run dev --prefix aria_backend\" \"npm run dev --prefix search_backend\"",
+    "start": "concurrently --kill-others-on-fail --prefix-colors \"cyan,magenta\" --names \"ARIA,SEARCH\" \"npm run start --prefix aria_backend\" \"npm run start --prefix search_backend\"",
+    "build": "concurrently --names \"ARIA,SEARCH\" \"npm run build --prefix aria_backend\" \"npm run build --prefix search_backend\"",
+    "install:all": "npm install && npm install --prefix aria_backend && npm install --prefix search_backend",
+    "aria": "npm run dev --prefix aria_backend",
+    "search": "npm run dev --prefix search_backend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
