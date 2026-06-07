@@ -1,17 +1,26 @@
 {
   "name": "nexal-backend",
   "version": "1.0.0",
-  "description": "Unified backend runner — starts Aria Backend (Socket.IO + AI) and Search Backend (REST API) together",
+  "description": "Unified backend gateway — ARIA + Search via single Render port",
   "private": true,
+  "type": "module",
+  "main": "dist/gateway.js",
   "scripts": {
     "postinstall": "npm install --prefix aria_backend && npm install --prefix search_backend",
-    "dev": "concurrently --kill-others-on-fail --prefix-colors \"cyan,magenta\" --names \"ARIA,SEARCH\" \"npm run dev --prefix aria_backend\" \"npm run dev --prefix search_backend\"",
-    "start": "concurrently --kill-others-on-fail --prefix-colors \"cyan,magenta\" --names \"ARIA,SEARCH\" \"npm run start --prefix aria_backend\" \"npm run start --prefix search_backend\"",
-    "build": "npm run build --prefix aria_backend && npm run build --prefix search_backend",
+    "build": "npm run build --prefix aria_backend && npm run build --prefix search_backend && tsc",
+    "start": "node dist/gateway.js",
+    "dev": "tsx src/gateway.ts",
     "aria": "npm run dev --prefix aria_backend",
     "search": "npm run dev --prefix search_backend"
   },
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "@types/http-proxy": "^1.17.16",
+    "@types/node": "^20.12.7",
+    "concurrently": "^8.2.2",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
   }
 }
