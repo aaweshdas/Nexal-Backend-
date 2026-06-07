@@ -457,7 +457,19 @@ async function fetchFeaturedFeed(): Promise<any> {
       console.log(`[Search Backend] Fetching real-time Wikipedia featured feed: ${url}`);
       const res = await fetch(url);
       if (res.ok) {
-        return await res.json();
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          const text = await res.text();
+          console.warn(`[Search Backend] Wikipedia feed returned non-JSON (${ct}): ${text.slice(0, 80)}`);
+          date.setDate(date.getDate() - 1);
+          continue;
+        }
+        const text = await res.text();
+        try {
+          return JSON.parse(text);
+        } catch (parseErr) {
+          console.warn(`[Search Backend] Wikipedia feed JSON parse failed: ${text.slice(0, 80)}`);
+        }
       }
     } catch (e) {
       console.error('[Search Backend] Failed to fetch featured feed for', `${y}/${m}/${d}`, ':', e);
@@ -701,9 +713,17 @@ app.get('/api/search', async (req, res) => {
       const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&prop=pageimages|extracts&piprop=thumbnail&pithumbsize=600&exintro&explaintext&exsentences=2&format=json&origin=*`;
       const response = await fetch(wikiUrl, { signal: controller.signal });
       clearTimeout(timeoutId);
-      const data = await response.json() as any;
 
-      if (data.query && data.query.pages) {
+      const rawText = await response.text();
+      let data: any;
+      try {
+        data = JSON.parse(rawText);
+      } catch (_) {
+        console.warn(`[Search Backend] Wikipedia search returned non-JSON: ${rawText.slice(0, 80)}`);
+        data = null;
+      }
+
+      if (data && data.query && data.query.pages) {
         const pages = Object.values(data.query.pages) as any[];
         // Sort by search index relevance
         pages.sort((a, b) => (a.index || 0) - (b.index || 0));
