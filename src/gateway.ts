@@ -9,6 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ─── Internal ports for sub-backends ───────────────────────────────────────────
 const ARIA_PORT   = 3003;
 const SEARCH_PORT = 3004;
+const GAME_PORT   = 3005;
 const GATEWAY_PORT = parseInt(process.env.PORT || '10000', 10);
 
 // ─── Spawn a sub-backend with an overridden PORT ────────────────────────────────
@@ -46,9 +47,10 @@ async function waitForBackend(name: string, port: number, maxRetries = 60): Prom
   console.error(`[Gateway] ✗ ${name} did not respond after ${maxRetries}s — opening gateway anyway`);
 }
 
-// ─── Start both backends ────────────────────────────────────────────────────────
+// ─── Start all backends ────────────────────────────────────────────────────────
 const ariaProc   = spawnBackend('ARIA',   'aria_backend',   ARIA_PORT);
 const searchProc = spawnBackend('SEARCH', 'search_backend', SEARCH_PORT);
+const gameProc   = spawnBackend('GAME',   'game_backend',   GAME_PORT);
 
 // ─── Proxy setup ────────────────────────────────────────────────────────────────
 const proxy = httpProxy.createProxyServer({ ws: true });
@@ -67,7 +69,7 @@ proxy.on('error', (err: any, _req, res) => {
   }
 });
 
-// ─── Routing: /api/* and /health (search) → Search; everything else → ARIA ─────
+// ─── Routing: /api/*, /game/*, and /health (search) → backends ─────────────────
 function getTarget(url: string): string {
   if (
     url.startsWith('/api/') || url === '/api' ||
@@ -75,12 +77,26 @@ function getTarget(url: string): string {
   ) {
     return `http://localhost:${SEARCH_PORT}`;
   }
+  if (
+    url.startsWith('/game/') || url === '/game'
+  ) {
+    return `http://localhost:${GAME_PORT}`;
+  }
   return `http://localhost:${ARIA_PORT}`;
 }
 
 // ─── HTTP server ────────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
-  const target = getTarget(req.url || '/');
+  const url = req.url || '/';
+  
+  // Redirect /game to /game/ to preserve relative paths
+  if (url === '/game') {
+    res.writeHead(301, { 'Location': '/game/' });
+    res.end();
+    return;
+  }
+  
+  const target = getTarget(url);
   proxy.web(req, res, { target });
 });
 
@@ -89,11 +105,12 @@ server.on('upgrade', (req, socket, head) => {
   proxy.ws(req, socket, head, { target: `http://localhost:${ARIA_PORT}` });
 });
 
-// ─── Wait for both backends, THEN open gateway ─────────────────────────────────
+// ─── Wait for all backends, THEN open gateway ──────────────────────────────────
 (async () => {
   await Promise.all([
     waitForBackend('ARIA',   ARIA_PORT),
     waitForBackend('SEARCH', SEARCH_PORT),
+    waitForBackend('GAME',   GAME_PORT),
   ]);
 
   server.listen(GATEWAY_PORT, '0.0.0.0', () => {
@@ -102,6 +119,7 @@ server.on('upgrade', (req, socket, head) => {
     console.log('  Nexal Backend Gateway — LIVE');
     console.log(`  Public Port : ${GATEWAY_PORT}`);
     console.log(`  /api/*      → Search Backend  (localhost:${SEARCH_PORT})`);
+    console.log(`  /game/*     → Game Backend    (localhost:${GAME_PORT})`);
     console.log(`  /*          → ARIA Backend    (localhost:${ARIA_PORT})`);
     console.log(`  Health      : http://0.0.0.0:${GATEWAY_PORT}/health`);
     console.log('═══════════════════════════════════════════════════════');
@@ -114,5 +132,6 @@ process.on('SIGTERM', () => {
   console.log('[Gateway] SIGTERM — shutting down...');
   ariaProc.kill('SIGTERM');
   searchProc.kill('SIGTERM');
+  gameProc.kill('SIGTERM');
   server.close(() => process.exit(0));
 });

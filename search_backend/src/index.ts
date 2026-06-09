@@ -579,6 +579,219 @@ app.get('/api/discovery', async (req, res) => {
   res.json(cached.discovery);
 });
 
+// ─── GOOGLE NEWS RSS INTEGRATION ──────────────────────────────────────────────
+
+const newsCategoryUrls: Record<string, string> = {
+  WORLD: 'https://news.google.com/news/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en',
+  BUSINESS: 'https://news.google.com/news/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en',
+  TECHNOLOGY: 'https://news.google.com/news/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en',
+  SCIENCE: 'https://news.google.com/news/rss/headlines/section/topic/SCIENCE?hl=en-US&gl=US&ceid=US:en',
+  HEALTH: 'https://news.google.com/news/rss/headlines/section/topic/HEALTH?hl=en-US&gl=US&ceid=US:en',
+  SPORTS: 'https://news.google.com/news/rss/headlines/section/topic/SPORTS?hl=en-US&gl=US&ceid=US:en',
+  ENTERTAINMENT: 'https://news.google.com/news/rss/headlines/section/topic/ENTERTAINMENT?hl=en-US&gl=US&ceid=US:en',
+};
+
+const categoryFallbackImages: Record<string, string[]> = {
+  WORLD: [
+    'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=600&auto=format&fit=crop&q=80',
+  ],
+  TECHNOLOGY: [
+    'https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1563089145-599997674d42?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
+  ],
+  BUSINESS: [
+    'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=600&auto=format&fit=crop&q=80',
+  ],
+  SCIENCE: [
+    'https://images.unsplash.com/photo-1614728894747-a83421e2b9c9?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=600&auto=format&fit=crop&q=80',
+  ],
+  HEALTH: [
+    'https://images.unsplash.com/photo-1506126613408-eca07ce68773?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1532938911079-1b06ac7ceec7?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=600&auto=format&fit=crop&q=80',
+  ],
+  SPORTS: [
+    'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=600&auto=format&fit=crop&q=80',
+  ],
+  ENTERTAINMENT: [
+    'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=600&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&auto=format&fit=crop&q=80',
+  ],
+};
+
+function extractTagContent(xmlPart: string, tag: string): string {
+  const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
+  const match = xmlPart.match(regex);
+  if (match && match[1]) {
+    return match[1].trim().replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
+  }
+  return '';
+}
+
+// Fetch Cover Image via og:image with a short (500ms) timeout
+async function fetchOgImage(articleUrl: string): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 500);
+  try {
+    const res = await fetch(articleUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) return '';
+    const html = await res.text();
+    const ogImageMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i) ||
+                         html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i) ||
+                         html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i);
+    if (ogImageMatch && ogImageMatch[1]) {
+      return ogImageMatch[1];
+    }
+  } catch (err) {
+    // Fail silently
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  return '';
+}
+
+// Simple in-memory news cache (TTL: 15 minutes)
+interface NewsCache {
+  articles: any[];
+  timestamp: number;
+}
+const newsCache: Record<string, NewsCache> = {};
+const NEWS_CACHE_TTL = 15 * 60 * 1000;
+
+async function getCategoryNews(category: string): Promise<any[]> {
+  const normalizedCategory = category.toUpperCase();
+  const now = Date.now();
+  
+  if (newsCache[normalizedCategory] && (now - newsCache[normalizedCategory].timestamp < NEWS_CACHE_TTL)) {
+    console.log(`[Search Backend] Serving news category "${normalizedCategory}" from cache`);
+    return newsCache[normalizedCategory].articles;
+  }
+  
+  const rssUrl = newsCategoryUrls[normalizedCategory] || 'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en';
+  try {
+    const res = await fetch(rssUrl);
+    if (!res.ok) {
+      throw new Error(`Failed to fetch RSS: status ${res.status}`);
+    }
+    const xml = await res.text();
+    const parts = xml.split('<item>');
+    const rawItems = parts.slice(1, 16); // Top 15 articles
+    
+    const parsedArticles = rawItems.map((part, idx) => {
+      const titleRaw = extractTagContent(part, 'title');
+      const link = extractTagContent(part, 'link');
+      const pubDate = extractTagContent(part, 'pubDate');
+      const sourceName = extractTagContent(part, 'source');
+      
+      let title = decodeHTMLEntities(titleRaw);
+      if (sourceName) {
+        const suffix = ` - ${sourceName}`;
+        if (title.endsWith(suffix)) {
+          title = title.substring(0, title.length - suffix.length);
+        }
+      }
+      
+      let relativeTime = 'Recently';
+      if (pubDate) {
+        try {
+          const delta = Date.now() - new Date(pubDate).getTime();
+          const hours = Math.floor(delta / (1000 * 60 * 60));
+          if (hours <= 0) {
+            const minutes = Math.floor(delta / (1000 * 60));
+            relativeTime = minutes > 0 ? `${minutes}m ago` : 'Just now';
+          } else if (hours < 24) {
+            relativeTime = `${hours}h ago`;
+          } else {
+            const days = Math.floor(hours / 24);
+            relativeTime = `${days}d ago`;
+          }
+        } catch (_) {}
+      }
+      
+      return {
+        id: `news_${normalizedCategory}_${idx}_${Date.now()}`,
+        category: 'NEWS',
+        title,
+        subtitle: `Read the latest story from ${sourceName || 'Google News'}.`,
+        tag: `#${normalizedCategory.toLowerCase()}`,
+        author: sourceName || 'Google News',
+        imageUrl: '',
+        coordinates: link,
+        pubDate: relativeTime
+      };
+    });
+    
+    // Resolve Open Graph cover images in parallel with tight timeouts
+    const finalArticles = await Promise.all(parsedArticles.map(async (art, idx) => {
+      let ogImage = '';
+      if (art.coordinates) {
+        ogImage = await fetchOgImage(art.coordinates);
+      }
+      
+      const fallbacks = categoryFallbackImages[normalizedCategory] || categoryFallbackImages.WORLD;
+      const fallbackImage = fallbacks[idx % fallbacks.length];
+      
+      return {
+        ...art,
+        imageUrl: ogImage || fallbackImage
+      };
+    }));
+    
+    newsCache[normalizedCategory] = {
+      articles: finalArticles,
+      timestamp: now
+    };
+    return finalArticles;
+  } catch (err) {
+    console.error(`[Search Backend] Error parsing Google News RSS for ${normalizedCategory}:`, err);
+    return newsCache[normalizedCategory]?.articles || [];
+  }
+}
+
+// ─── ENDPOINTS ────────────────────────────────────────────────────────────────
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'online', service: 'Search Backend', port: PORT });
+});
+
+app.get('/api/trending', async (req, res) => {
+  const cached = await getOrUpdateCache();
+  res.json(cached.trending);
+});
+
+app.get('/api/suggestions', async (req, res) => {
+  const cached = await getOrUpdateCache();
+  res.json(cached.suggestions);
+});
+
+app.get('/api/discovery', async (req, res) => {
+  const cached = await getOrUpdateCache();
+  res.json(cached.discovery);
+});
+
+// GET /api/news?category=WORLD
+app.get('/api/news', async (req, res) => {
+  const category = (req.query.category as string || 'WORLD').toUpperCase();
+  const articles = await getCategoryNews(category);
+  res.json(articles);
+});
+
 app.get('/api/search', async (req, res) => {
   const query = (req.query.q as string || '').trim().toLowerCase();
   const filter = (req.query.filter as string || 'ALL').trim().toUpperCase();
@@ -586,56 +799,20 @@ app.get('/api/search', async (req, res) => {
   const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
   const cx = process.env.GOOGLE_SEARCH_CX;
 
-  // 0. If empty query, serve dynamically mapped category lists from the real-time Wikipedia featured feed!
+  // 0. If empty query, serve dynamically mapped category lists from the real-time Google News RSS!
   if (query.length === 0) {
-    try {
-      const feed = await fetchFeaturedFeed();
-      if (feed && feed.mostread && Array.isArray(feed.mostread.articles)) {
-        const articles = feed.mostread.articles;
-        
-        let targetArticles = articles;
-        if (filter !== 'ALL') {
-          const slices: Record<string, [number, number]> = {
-            'PEOPLE': [0, 6],
-            'PHOTOS': [6, 12],
-            'VIDEOS': [12, 18],
-            'PLACES': [18, 24],
-            'LIVE': [24, 30]
-          };
-          const [start, end] = slices[filter] || [0, 10];
-          targetArticles = articles.slice(start, end);
-        } else {
-          targetArticles = articles.slice(0, 15);
-        }
-
-        const dynamicResults = targetArticles.map((art: any, idx: number) => {
-          const cat = filter === 'ALL' ? (['PEOPLE', 'PHOTOS', 'VIDEOS', 'PLACES', 'LIVE'][idx % 5]) : filter;
-          const cleanSnippet = (art.extract || art.description || '').replace(/<\/?[^>]+(>|$)/g, "");
-          const link = art.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(art.title)}`;
-          const imageUrl = art.thumbnail?.source || fallbackImages[idx % fallbackImages.length];
-
-          return {
-            id: `feed_${art.pageid || idx}_${Date.now()}`,
-            category: cat,
-            title: art.normalizedtitle || art.title,
-            subtitle: cleanSnippet,
-            tag: '#' + (art.normalizedtitle || art.title).replace(/[^a-zA-Z0-9]/g, ''),
-            author: art.description ? `@${art.description.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 12)}` : 'wikipedia.org',
-            imageUrl: imageUrl,
-            followers: art.views ? `${(art.views / 1000).toFixed(1)}k views` : 'Real Web Result',
-            likes: 'Wiki',
-            duration: 'Read',
-            views: art.views ? `${art.views.toLocaleString()} views` : 'Wikipedia Index',
-            distance: 'Wiki Link',
-            coordinates: link,
-            viewers: 'Active Info'
-          };
-        });
-        return res.json(dynamicResults);
-      }
-    } catch (e) {
-      console.error('[Search Backend] Error generating dynamic empty-query results:', e);
-    }
+    // Map existing filters to news categories
+    const categoryMap: Record<string, string> = {
+      'ALL': 'WORLD',
+      'PEOPLE': 'WORLD',
+      'PHOTOS': 'ENTERTAINMENT',
+      'VIDEOS': 'TECHNOLOGY',
+      'PLACES': 'BUSINESS',
+      'LIVE': 'SCIENCE'
+    };
+    const newsCategory = categoryMap[filter] || 'WORLD';
+    const articles = await getCategoryNews(newsCategory);
+    return res.json(articles);
   }
 
   // 1. YouTube Search Integration (for VIDEOS and LIVE filters)
@@ -651,10 +828,86 @@ app.get('/api/search', async (req, res) => {
     }
   }
 
+  // 2. Google News search aggregation for NEWS filter
+  if (filter === 'NEWS') {
+    const searchUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
+    try {
+      console.log(`[Search Backend] Querying Google News search: ${searchUrl}`);
+      const resNews = await fetch(searchUrl);
+      if (resNews.ok) {
+        const xml = await resNews.text();
+        const parts = xml.split('<item>');
+        const rawItems = parts.slice(1, 16); // Top 15 results
+        
+        const parsedArticles = rawItems.map((part, idx) => {
+          const titleRaw = extractTagContent(part, 'title');
+          const link = extractTagContent(part, 'link');
+          const pubDate = extractTagContent(part, 'pubDate');
+          const sourceName = extractTagContent(part, 'source');
+          
+          let title = decodeHTMLEntities(titleRaw);
+          if (sourceName) {
+            const suffix = ` - ${sourceName}`;
+            if (title.endsWith(suffix)) {
+              title = title.substring(0, title.length - suffix.length);
+            }
+          }
+          
+          let relativeTime = 'Recently';
+          if (pubDate) {
+            try {
+              const delta = Date.now() - new Date(pubDate).getTime();
+              const hours = Math.floor(delta / (1000 * 60 * 60));
+              if (hours <= 0) {
+                const minutes = Math.floor(delta / (1000 * 60));
+                relativeTime = minutes > 0 ? `${minutes}m ago` : 'Just now';
+              } else if (hours < 24) {
+                relativeTime = `${hours}h ago`;
+              } else {
+                const days = Math.floor(hours / 24);
+                relativeTime = `${days}d ago`;
+              }
+            } catch (_) {}
+          }
+          
+          return {
+            id: `news_search_${idx}_${Date.now()}`,
+            category: 'NEWS',
+            title,
+            subtitle: `Read the story from ${sourceName || 'Google News'}.`,
+            tag: '#googlenews',
+            author: sourceName || 'Google News',
+            imageUrl: '',
+            coordinates: link,
+            pubDate: relativeTime
+          };
+        });
+        
+        // Parallel og:image scraper with timeout
+        const finalArticles = await Promise.all(parsedArticles.map(async (art, idx) => {
+          let ogImage = '';
+          if (art.coordinates) {
+            ogImage = await fetchOgImage(art.coordinates);
+          }
+          const fallbacks = categoryFallbackImages.WORLD;
+          const fallbackImage = fallbacks[idx % fallbacks.length];
+          return {
+            ...art,
+            imageUrl: ogImage || fallbackImage
+          };
+        }));
+        
+        return res.json(finalArticles);
+      }
+    } catch (e: any) {
+      console.error('[Search Backend] Google News search failed:', e.message || e);
+    }
+  }
+
   let googleResults: any[] = [];
   let googleSuccess = false;
 
-  // 1. Google Custom Search (if keys are configured in .env)
+  // 3. Google Custom Search (standard web results)
   if (apiKey && cx && query.length > 0) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3500);
@@ -705,7 +958,7 @@ app.get('/api/search', async (req, res) => {
     return res.json(googleResults);
   }
 
-  // 2. Wikipedia Search API Fallback (if real search requested but Google failed or no keys)
+  // 4. Wikipedia Search API Fallback
   if (query.length > 0) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3500);
@@ -725,7 +978,6 @@ app.get('/api/search', async (req, res) => {
 
       if (data && data.query && data.query.pages) {
         const pages = Object.values(data.query.pages) as any[];
-        // Sort by search index relevance
         pages.sort((a, b) => (a.index || 0) - (b.index || 0));
 
         const wikiResults = pages.map((page: any, idx: number) => {
@@ -764,7 +1016,7 @@ app.get('/api/search', async (req, res) => {
     }
   }
 
-  // 3. Fallback to Local Mock Database search
+  // 5. Fallback to Local Mock Database search
   let results = searchDatabase;
   if (filter !== 'ALL') {
     results = results.filter(item => item.category === filter);

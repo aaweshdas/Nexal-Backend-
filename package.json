@@ -6,12 +6,13 @@
   "type": "module",
   "main": "dist/gateway.js",
   "scripts": {
-    "postinstall": "npm install --prefix aria_backend && npm install --prefix search_backend",
-    "build": "npm run build --prefix aria_backend && npm run build --prefix search_backend && tsc",
+    "postinstall": "npm install --prefix aria_backend && npm install --prefix search_backend && npm install --prefix game_backend",
+    "build": "npm run build --prefix aria_backend && npm run build --prefix search_backend && npm run build --prefix game_backend && tsc",
     "start": "node dist/gateway.js",
     "dev": "tsx src/gateway.ts",
     "aria": "npm run dev --prefix aria_backend",
-    "search": "npm run dev --prefix search_backend"
+    "search": "npm run dev --prefix search_backend",
+    "game": "npm run dev --prefix game_backend"
   },
   "dependencies": {
     "http-proxy": "^1.18.1"
